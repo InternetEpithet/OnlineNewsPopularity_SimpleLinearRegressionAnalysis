@@ -1,0 +1,500 @@
+---
+title: "STAC67 Final Project"
+author: "Alex Cheng, Zaamin Rattansi, Jacob Temple, Jeffrey Wong"
+date: "12/05/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+# Load libraries
+library(ggplot2)
+library(GGally)
+library(MASS)
+library(leaps)
+library(dvmisc)
+library(corrplot)
+library(RColorBrewer)
+
+library(MPV)
+library(car)
+```
+
+# Introduction
+The purpose of this research is to study the direct and indirect relationships of metrics for Mashable news articles and the amount an article was shared by readers. This will be done through thorough analysis of the variables that have an effect on the number of shares of an article. Variables that are directly related, and variables that have less importance were included to see the largest range of relationships possible and to really understand what affects the amount an article is shared by Mashable users. 
+
+
+## Background
+The data we have analyzed and studied is taken from a multi-platform media company called Mashable. The data was taken to analyze the number of shares a new article receives in relation to various other variables. The chosen variables had some relation to the amount an article may be shared and our models show the importance of some factors vs others regarding the amount an article may be shared. There may be many other factors that cause a post to be shared, however, we can only analyse the data that has been collected.
+
+## Study Goal
+We will analyze what variables cause an increase or decrease in the number of shares to learn more about what future articles require in order to be shared more by Mashable users. 
+
+## Description of Dataset
+
+The data was cleaned mainly be eliminating variables that were either redundant to the number of shares or if similar variables were used. For example, we removed any max and min variables and instead used the average variables. It was unnecessary to use all three, the max, min, and average, when we can just use the average variables. We also removed all the LDA variables since they are irrelevant to the following analysis. It was also important to remove the baseline variables for categorical variables as the data already provides factored categorical variables (Weekday and Data Channel). Also removed were variables that had perfect collegiality, e.g., is_weekend.
+
+
+```{r echo=FALSE}
+# Set seed for reproducibility of data split
+set.seed(123456)
+
+# Load data set into data frame
+data_set <- read.csv("OnlineNewsPopularity.csv")
+
+# Consider only a subset of the explanatory variables by removing the unused ones
+# Since the data set comes with the categorical variables already factored, must remove baseline variables
+
+shares <- subset(data_set, select = -c(1,2,19,20,21,23,24,26,27,38, 39, 40, 41, 42, 43, 44, 49,50, 53))
+
+# Randomly split data set ~50/50 for building/validating
+split <- rbinom(nrow(shares), 1, 0.5)
+
+shares_build <- shares[split == 1, ]
+shares_valid <- shares[split == 0, ]
+```
+
+
+## Preliminary Investigation of Data
+
+```{r, out.width="50%", echo=FALSE}
+weekday = c('Mon', 'Tues', 'Wed', 'Thur', 'Fri', 'Sat', 'Sun')
+count_weekday = c(6661, 7390, 7435, 7262, 5701, 2453, 2737)
+data_channel = c('Lifestyle', 'Entertain', 'Bus', 'Socmed', 'Tech', 'World')
+count_channel = c(2099, 7057, 6258, 2323, 7346, 8427)
+
+barplot(count_weekday,names.arg=weekday, xlab="Weekday",ylab="count",col="red", space = 2)
+barplot(count_channel,names.arg=data_channel, xlab="Data Channel",ylab="count",col="red",space = 2)
+```
+
+```{r echo = FALSE, fig.width = 7, fig.height = 10, out.width="50%"}
+num_vars <- subset(data_set, select = c(8, 10, 11, 13))
+boxplot(num_vars, outline = FALSE)
+
+num_vars <- subset(data_set, select = c(47, 48, 49, 50))
+boxplot(num_vars, outline = FALSE, xaxt = "n",  xlab = "")
+axis(1, labels = FALSE)
+text(x = c(1.2,2.2,3.2,4.2), y = par("usr")[3] - (par("usr")[4] - par("usr")[3])/30, srt = 20, adj = 1, labels = paste(colnames(data_set[c(47, 48, 49, 50)])), xpd = TRUE)
+
+num_vars <- subset(data_set, select = c(31, 61))
+plot(num_vars)
+smoothing <- smooth.spline(num_vars$self_reference_avg_shares, num_vars$shares, spar=0.35)
+lines(smoothing, col="red")
+
+num_vars <- subset(data_set, select = c(58, 61))
+plot(num_vars) 
+smoothing <- smooth.spline(num_vars$title_sentiment_polarity, num_vars$shares, spar=0.35)
+lines(smoothing, col="red")
+```
+
+```{r, fig.allign="center", out.width="65%", echo=FALSE}
+M <- cor(shares_build[c( "n_tokens_content", "n_unique_tokens", "title_subjectivity","global_subjectivity", "abs_title_sentiment_polarity", "n_non_stop_unique_tokens", "avg_positive_polarity", "average_token_length")])
+corrplot(M, type="upper", order="hclust",
+         col=brewer.pal(n=8, name="RdYlBu"))
+```
+
+\pagebreak
+# Model Building
+
+## Full Model With Interactions
+```{r echo=FALSE}
+# Build full model with interactions
+fit0 <- lm(shares ~ . +
+             n_tokens_content:(weekday_is_monday + weekday_is_tuesday +
+                                    weekday_is_wednesday + weekday_is_thursday +
+                                    weekday_is_friday + weekday_is_saturday) +
+             global_subjectivity:(avg_negative_polarity + abs_title_subjectivity +
+                                    abs_title_sentiment_polarity) +
+             num_imgs:num_hrefs
+            + weekday_is_monday:(data_channel_is_bus +data_channel_is_tech)
+            + weekday_is_wednesday:(data_channel_is_tech )
+            + weekday_is_friday:(data_channel_is_entertainment)
+            + num_self_hrefs:num_hrefs + num_imgs:average_token_length
+            +weekday_is_monday:(avg_negative_polarity+avg_positive_polarity)
+            +weekday_is_tuesday:(avg_negative_polarity)
+            +weekday_is_wednesday:(avg_negative_polarity+avg_positive_polarity)
+            +data_channel_is_entertainment:(avg_positive_polarity+avg_negative_polarity)
+            +avg_positive_polarity:(data_channel_is_socmed+data_channel_is_lifestyle)
+            +avg_negative_polarity:(data_channel_is_bus)
+            +abs_title_sentiment_polarity:(data_channel_is_lifestyle+data_channel_is_entertainment )
+            +n_tokens_content:avg_negative_polarity
+            +abs_title_subjectivity:(data_channel_is_bus+data_channel_is_tech )
+            +title_sentiment_polarity:(data_channel_is_entertainment+ data_channel_is_bus)
+            +n_non_stop_words:(kw_avg_max)
+            +n_tokens_content:(kw_avg_max+kw_avg_min+kw_avg_avg)
+            +n_non_stop_unique_tokens:(kw_avg_max+kw_avg_avg)
+            +average_token_length:(kw_avg_max+kw_avg_min)
+            +num_keywords:(kw_avg_max+kw_avg_min)
+            +kw_avg_avg:(global_rate_positive_words+global_sentiment_polarity)
+            +global_rate_negative_words:(kw_avg_max)
+            +global_sentiment_polarity:(weekday_is_tuesday+weekday_is_saturday)
+            +self_reference_avg_sharess:(weekday_is_monday+weekday_is_tuesday+weekday_is_thursday+weekday_is_saturday)
+            +self_reference_avg_sharess:(data_channel_is_entertainment+data_channel_is_bus+data_channel_is_socmed+data_channel_is_tech)
+            +self_reference_avg_sharess:(title_subjectivity+abs_title_subjectivity)
+            +self_reference_avg_sharess:(global_subjectivity+global_sentiment_polarity+global_rate_positive_words)
+            +self_reference_avg_sharess:(kw_avg_max+kw_avg_avg)
+            +self_reference_avg_sharess:(n_tokens_content+n_unique_tokens+num_keywords)
+            +self_reference_avg_sharess:(num_self_hrefs+num_hrefs+num_videos)
+            +self_reference_avg_sharess:(self_reference_max_shares+self_reference_min_shares)
+            +self_reference_max_shares:(weekday_is_monday+weekday_is_wednesday+weekday_is_thursday+weekday_is_friday)
+            +self_reference_max_shares:(global_subjectivity+global_sentiment_polarity+global_rate_positive_words)
+            +avg_negative_polarity:(min_negative_polarity+max_negative_polarity)
+            +num_videos:(data_channel_is_tech)
+            +num_imgs:( data_channel_is_bus + data_channel_is_socmed)
+            , data=shares_build)
+summary(fit0)[6:10]
+```
+
+## Model 1 - Stepwise Regression of Full Model
+```{r eval=FALSE, include=FALSE}
+# Stepwise regression (AIC based)
+fit_simple <- lm(shares ~ 1, data=shares_build)
+step <- stepAIC(fit_simple, direction="both", scope=list(upper=fit0,lower=fit_simple))
+```
+
+```{r echo=FALSE}
+# Best model based on stepwise regression
+
+vars1 <- "kw_avg_avg+self_reference_min_shares+num_hrefs+avg_negative_polarity+average_token_length+global_subjectivity+num_keywords+kw_avg_min+data_channel_is_entertainment+num_imgs+num_self_hrefs+weekday_is_monday+data_channel_is_lifestyle+self_reference_max_shares+self_reference_avg_sharess+kw_avg_max+num_videos+num_hrefs:num_imgs+average_token_length:num_imgs+avg_negative_polarity:data_channel_is_entertainment+num_hrefs:num_self_hrefs+avg_negative_polarity:weekday_is_monday+average_token_length:kw_avg_min+weekday_is_monday:self_reference_max_shares+global_subjectivity:self_reference_max_shares+self_reference_max_shares:self_reference_avg_sharess+weekday_is_monday:self_reference_avg_sharess+global_subjectivity:self_reference_avg_sharess+kw_avg_avg:self_reference_avg_sharess+self_reference_min_shares:self_reference_avg_sharess+num_hrefs:self_reference_avg_sharess+num_self_hrefs:self_reference_avg_sharess+self_reference_avg_sharess:kw_avg_max+num_keywords:self_reference_avg_sharess+self_reference_avg_sharess:num_videos"
+
+#vars1 <- paste(labels(step$terms), collapse = "+")
+fit1 <- lm(paste("shares ~", vars1, sep = " "), data=shares_build)
+
+summary(fit1)[6:10]
+```
+
+
+## Model 2 - Subset Regression on Model 1
+```{r eval=FALSE, include=FALSE}
+# All possible (subset) regressions on fit1
+
+# To see all subsets
+# options(max.print=50000)
+
+# calculate all subsets of <=13 predictors' diagnostics
+all_shares <- regsubsets(as.formula(paste("shares ~", vars1, sep = " ")),
+                         nbest = 6000, really.big=T, nvmax=32, data = shares_build)
+aprout <- summary(all_shares)
+n <- nrow(shares_build)
+p <- apply(aprout$which, 1, sum)
+aprout$aic <- aprout$bic - log(n)*p+2*p
+with(aprout, round(cbind(which,rsq,adjr2,cp,bic,aic),3))
+
+#Find the best model
+best_aic <- which.min(aprout[["aic"]])
+best_bic <- which.min(aprout[["bic"]])
+best_rsq <- which.max(aprout[["rsq"]])
+best_adjr2 <- which.max(aprout[["adjr2"]])
+best_cp <- which.min(aprout[["cp"]])
+stats <- cbind(best_aic, best_bic, best_rsq, best_adjr2, best_cp)
+
+# Mode function
+getmode <- function(v) {
+ uniqv <- unique(v)
+ uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+```
+
+```{r echo=FALSE}
+# Best model based on rsq, adjr2, cp, bic, and aic
+vars2 <- "kw_avg_avg+self_reference_min_shares+num_hrefs+avg_negative_polarity+average_token_length+num_self_hrefs+weekday_is_monday+data_channel_is_lifestyle+self_reference_max_shares+self_reference_avg_sharess+kw_avg_max+num_hrefs:num_imgs+average_token_length:num_imgs+avg_negative_polarity:data_channel_is_entertainment+num_hrefs:num_self_hrefs+avg_negative_polarity:weekday_is_monday+average_token_length:kw_avg_min+weekday_is_monday:self_reference_max_shares+global_subjectivity:self_reference_max_shares+self_reference_max_shares:self_reference_avg_sharess+weekday_is_monday:self_reference_avg_sharess+global_subjectivity:self_reference_avg_sharess+kw_avg_avg:self_reference_avg_sharess+self_reference_min_shares:self_reference_avg_sharess+num_hrefs:self_reference_avg_sharess+num_self_hrefs:self_reference_avg_sharess+self_reference_avg_sharess:kw_avg_max+num_keywords:self_reference_avg_sharess+self_reference_avg_sharess:num_videos"
+
+#vars2 <- paste(labels(step$terms)[as.numeric(aprout[["which"]][getmode(stats),2:36 ]) == 1], collapse="+")
+fit2 <- lm(paste("shares ~", vars2, sep = " "), data=shares_build)
+
+summary(fit2)[6:10]
+```
+
+
+# Model Diagnostics
+
+The number of outliers:
+```{r echo=FALSE}
+t = rstudent(fit2)
+
+alpha = 0.05
+n = dim(shares_build)[1]
+p.prime = length(coef(fit2))
+
+t.crit = qt(1-alpha/(2*n), n-p.prime-1)
+
+#return index of vector satisfying the condition
+Outlier <- which(abs(t) > t.crit)
+length(Outlier)
+```
+
+Number of leverage points:
+```{r echo=FALSE}
+hii = hatvalues(fit2)
+Leverage <- which(hii>2*p.prime/n)
+length(Leverage)
+```
+
+Number of influential points (DFFITS & DFBETAS):
+```{r echo=FALSE}
+DFFITS = dffits(fit2)
+Influence1 <- c(which(abs(DFFITS) > 2*sqrt(p.prime/n)))
+length(Influence1)
+
+DFBETAS = dfbetas(fit2)
+Influence2 <- c(which(abs(DFBETAS) > 2*sqrt(1/n)))
+length(Influence2)
+```
+
+We removed all outliers, leverage points, and influential points.
+```{r echo=FALSE}
+removal = unique(c(Outlier, Leverage, Influence1, Influence2))
+new_build = shares_build[-c(removal),]
+```
+
+
+## Model 3 - Full Model Before and After log Transformation
+
+```{r include=FALSE}
+result0 <- boxcox(fit0)
+mylambda0 = result0$x[which.max(result0$y)]
+
+#y.star3 = log(new_build$shares)
+fit3 = lm(log(shares) ~ . +
+             n_tokens_content:(weekday_is_monday + weekday_is_tuesday +
+                                    weekday_is_wednesday + weekday_is_thursday +
+                                    weekday_is_friday + weekday_is_saturday) +
+             global_subjectivity:(avg_negative_polarity + abs_title_subjectivity +
+                                    abs_title_sentiment_polarity) +
+             num_imgs:num_hrefs
+            + weekday_is_monday:(data_channel_is_bus +data_channel_is_tech)
+            + weekday_is_wednesday:(data_channel_is_tech )
+            + weekday_is_friday:(data_channel_is_entertainment)
+            + num_self_hrefs:num_hrefs + num_imgs:average_token_length + weekday_is_monday:(avg_negative_polarity+avg_positive_polarity)
+            +weekday_is_tuesday:(avg_negative_polarity)
+            +weekday_is_wednesday:(avg_negative_polarity+avg_positive_polarity)
+            + data_channel_is_entertainment:(avg_positive_polarity+avg_negative_polarity)
+            +avg_positive_polarity:(data_channel_is_socmed+data_channel_is_lifestyle)
+            +avg_negative_polarity:(data_channel_is_bus)
+            +abs_title_sentiment_polarity:(data_channel_is_lifestyle+data_channel_is_entertainment ) + n_tokens_content:avg_negative_polarity
+            +abs_title_subjectivity:(data_channel_is_bus+data_channel_is_tech )
+            +title_sentiment_polarity:(data_channel_is_entertainment+ data_channel_is_bus)
+            +n_non_stop_words:(kw_avg_max)
+            +n_tokens_content:(kw_avg_max+kw_avg_min+kw_avg_avg)
+            + n_non_stop_unique_tokens:(kw_avg_max+kw_avg_avg)
+            +average_token_length:(kw_avg_max+kw_avg_min)
+            +num_keywords:(kw_avg_max+kw_avg_min)
+            +kw_avg_avg:(global_rate_positive_words+global_sentiment_polarity)
+            +global_rate_negative_words:(kw_avg_max)
+            +global_sentiment_polarity:(weekday_is_tuesday+weekday_is_saturday)
+            +self_reference_avg_sharess:(weekday_is_monday+weekday_is_tuesday+weekday_is_thursday+weekday_is_saturday)
+            +self_reference_avg_sharess:(data_channel_is_entertainment+data_channel_is_bus+data_channel_is_socmed+data_channel_is_tech)
+            +self_reference_avg_sharess:(title_subjectivity+abs_title_subjectivity)
+            +self_reference_avg_sharess:(global_subjectivity+global_sentiment_polarity+global_rate_positive_words)
+            +self_reference_avg_sharess:(kw_avg_max+kw_avg_avg)
+            +self_reference_avg_sharess:(n_tokens_content+n_unique_tokens+num_keywords)
+            +self_reference_avg_sharess:(num_self_hrefs+num_hrefs+num_videos)
+            +self_reference_avg_sharess:(self_reference_max_shares+self_reference_min_shares)
+            
+            +self_reference_max_shares:(weekday_is_monday+weekday_is_wednesday+weekday_is_thursday+weekday_is_friday)
+            +self_reference_max_shares:(global_subjectivity+global_sentiment_polarity+global_rate_positive_words)
+            
+            +avg_negative_polarity:(min_negative_polarity+max_negative_polarity)
+            
+            +
+            
+            +num_videos:(data_channel_is_tech)
+            +num_imgs:( data_channel_is_bus + data_channel_is_socmed)
+            , data=new_build)
+
+```
+
+```{r, out.width="50%", echo=FALSE}
+#normal and constant variance check for fit0
+resid0 = fit0$residuals
+pred0 = fit0$fitted.values
+
+par(mfrow=c(1,2))
+plot(pred0, resid0, pch=20, col="red",cex=2)
+abline(c(0,0))
+
+qqnorm(resid0)
+qqline(resid0)
+
+
+resid3 = fit3$residuals
+pred3 = fit3$fitted.values
+
+par(mfrow=c(1,2))
+plot(pred3, resid3, pch=20, col="red",cex=2)
+abline(c(0,0))
+
+qqnorm(resid3)
+qqline(resid3)
+```
+
+
+## Model 4 - Model 1 Before and After log Transformation
+
+```{r include=FALSE}
+result1 <- boxcox(fit1)
+mylambda1 = result1$x[which.max(result1$y)]
+
+#y.star4 = log(new_build$shares)
+fit4 = lm(paste("log(shares) ~", vars1, sep = " "), data=new_build)
+```
+
+```{r, out.width="50%", echo=FALSE}
+#normal and constant variance check for fit1
+resid1 = fit1$residuals
+pred1 = fit1$fitted.values
+
+par(mfrow=c(1,2))
+plot(pred1, resid1, pch=20, col="red",cex=2)
+abline(c(0,0))
+
+qqnorm(resid1)
+qqline(resid1)
+
+resid4 = fit4$residuals
+pred4 = fit4$fitted.values
+
+par(mfrow=c(1,2))
+plot(pred4, resid4, pch=20, col="red",cex=2)
+abline(c(0,0))
+
+qqnorm(resid4)
+qqline(resid4)
+```
+
+## Model 5 - Model 2 Before and After log Transformation
+
+```{r include=FALSE}
+result2 <- boxcox(fit2)
+mylambda2 = result2$x[which.max(result2$y)]
+
+#y.star5 = log(new_build$shares)
+fit5 = lm(paste("log(shares) ~", vars2, sep = " "), data=new_build)
+```
+
+```{r, out.width="50%", echo=FALSE}
+#normal and constant variance check for fit2
+resid2 = fit2$residuals
+pred2 = fit2$fitted.values
+
+par(mfrow=c(1,2))
+plot(pred2, resid2, pch=20, col="red",cex=2)
+abline(c(0,0))
+
+qqnorm(resid2)
+qqline(resid2)
+
+resid5 = fit5$residuals
+pred5 = fit5$fitted.values
+
+par(mfrow=c(1,2))
+plot(pred5, resid5, pch=20, col="red",cex=2)
+abline(c(0,0))
+
+qqnorm(resid5)
+qqline(resid5)
+```
+
+
+PRESS Statistics for Models 1-5
+```{r echo=FALSE}
+PRESS(fit0)
+PRESS(fit1)
+PRESS(fit2)
+PRESS(fit3)
+PRESS(fit4)
+PRESS(fit5)
+```
+
+Variables with VIF >10 for Model 5:
+```{r echo=FALSE}
+VIF0 = vif(fit0)
+VIF1 = vif(fit1)
+VIF2 = vif(fit2)
+VIF3 = vif(fit3)
+VIF4 = vif(fit4)
+VIF5 = vif(fit5)
+high_vif_vars <- cbind(which(VIF5 > 10))
+high_vif_vars
+```
+
+## Model 6 - Model 5 After removing Variables with High VIF
+```{r echo=FALSE}
+# Remove variables with high VIF from fit2
+vars6 <- "kw_avg_avg+num_hrefs+avg_negative_polarity+average_token_length+num_self_hrefs+weekday_is_monday+data_channel_is_lifestyle+kw_avg_max+num_hrefs:num_imgs+average_token_length:num_imgs+avg_negative_polarity:data_channel_is_entertainment+num_hrefs:num_self_hrefs+avg_negative_polarity:weekday_is_monday+average_token_length:kw_avg_min+weekday_is_monday:self_reference_max_shares+weekday_is_monday:self_reference_avg_sharess+self_reference_min_shares:self_reference_avg_sharess+num_hrefs:self_reference_avg_sharess+num_self_hrefs:self_reference_avg_sharess+self_reference_avg_sharess:kw_avg_max+self_reference_avg_sharess:num_videos"
+
+#vars6 <- paste(labels(step$terms)[as.numeric(aprout[["which"]][getmode(stats),2:36 ]) == 1][-high_vif_vars], collapse="+")
+
+fit6 <- lm(paste("log(shares) ~", vars6, sep = " "), data=new_build)
+
+summary(fit6)[6:10]
+```
+
+
+# Model Validation
+
+Difference betwee MSPE and MSE for Models 3-6
+```{r echo=FALSE}
+
+predict_value = predict(fit3, shares_valid)
+predict_value1 = predict(fit4, shares_valid)
+predict_value2 = predict(fit5, shares_valid)
+predict_value3 = predict(fit6, shares_valid)
+
+n = dim(shares_valid)[1]
+
+delta = shares_valid$shares - predict_value
+MSPE <- sum((delta)^2)/n
+MSPE - get_mse(fit3, var.estimate = FALSE)
+
+delta = shares_valid$shares - predict_value1
+MSPE1 <- sum((delta)^2)/n
+MSPE1 - get_mse(fit4, var.estimate = FALSE)
+
+delta = shares_valid$shares - predict_value2
+MSPE2 <- sum((delta)^2)/n
+MSPE2 - get_mse(fit5, var.estimate = FALSE)
+
+delta = shares_valid$shares - predict_value3
+MSPE3 <- sum((delta)^2)/n
+MSPE3 - get_mse(fit6, var.estimate = FALSE)
+```
+
+
+
+# Conclusion
+
+## Final Model
+Based on the above analysis, we have chosen the following linear model:
+
+```{r echo=FALSE}
+summary(fit6)
+
+resid6 = fit6$residuals
+pred6 = fit6$fitted.values
+
+par(mfrow=c(1,2))
+plot(pred6, resid6, pch=20, col="red",cex=2)
+abline(c(0,0))
+
+qqnorm(resid6)
+qqline(resid6)
+```
+
+We can see that each variable only affects the number of share very slightly. Among the variables that affect the greatest change in shares, we see that with each unit increase in the average negative polarity of an article, while holding all other variables constant, we see a -0.22 decrease in the number of shares. Additionally, we see that articles posted on Mondays have 0.1 fewer shares than those posted on Sunday (baseline variable for the weekday on which an article was posted). We also see that the average negative polarity of articles posted in the entertainment data channel impacts the rate at which the article is shared.
+This aligns with our intuition of how an article's shares might be influenced.
+
+Note that $R^2 = 0.09032$ and $R_{adj}^{2} = 0.0893$, which shows that the predictive power of our model is very low. Note also the difference between MSPE and MSE is very large.
+
+As such, we have not found a model suitable for establishing a clear relationship between the variables captured in the data and the number of shares an article receives.
+
+## Obstacles
+Notably missing are Brown-Forsyth and Shapiro-Wilks tests for equal and normally distributed variance due to R's processing limitations with our large data set. This is more or less accommodated by the Residual Plots against predicted values and Normal Q-Q Plots.
+
+Additionally, the data provided better lends itself to a multivariate analysis given the large number of variable which is out of the scope of this course.
+
+## Next Steps
+One might perform a multivariate analysis on the given data while using technology that is able to adequately handle the large amount of data.
+
+
+
