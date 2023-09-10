@@ -1,7 +1,7 @@
 # Simple-Linear-Regression
 This was a group project for my course STAC67, Regression Analysis, a third year course at UofT. 
 
-This course was taken in the Winter of 2022. For this project I was primarily responsible for model diagnosis and validation. 
+This course was taken in the Fall of 2022-2023. For this project I was primarily responsible for model diagnosis and validation. 
 
 Model creation and putting everything together into a presentable piece was not my primary responsibility. 
 
